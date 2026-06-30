@@ -1,0 +1,32 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+backend/data/
+# node
+node_modules/
+frontend/dist/
+# os
+.DS_Store
+# scratch
+sample_data/_chart.png
+# PyInstaller
+desktop/build/
+desktop/dist/
+*.manifest
+
+# --- models & runtime artifacts (large / machine-specific) ---
+*.onnx
+*.pt
+*.log
+backend/app/vendor/**/models/*
+!backend/app/vendor/**/models/README.txt
+# --- user secrets / local config (also live in ~/FormuDoc, never here) ---
+*.key
+gemini.txt
+simpletex.json
+*.token
+# --- conversion in/out ---
+/uploads/
+/outputs/
+*.tmp

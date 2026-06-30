@@ -1,0 +1,44 @@
+# ===================================================================
+# FormuDoc backend dependencies.
+# Pins are RANGES (not exact) so pip can pick prebuilt wheels for your
+# Python version — important on very new Pythons (3.13/3.14). Always
+# install with --prefer-binary (the build scripts already do this):
+#     pip install --prefer-binary -r requirements.txt
+# Tip: Python 3.11 or 3.12 has the widest wheel coverage.
+# ===================================================================
+
+# ---- Core (required) ----
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic>=2.9
+pydantic-settings>=2.5
+
+# ---- PDF parsing / layout ----
+PyMuPDF>=1.24.10          # fitz: ships abi3 wheels (work on new Pythons)
+pdfplumber>=0.11.4        # table detection
+Pillow>=10.4              # images / crops
+
+# ---- DOCX building ----
+python-docx>=1.1.0
+pypandoc>=1.13            # uses the pandoc CLI for editable (OMML) equations
+lxml>=5.0
+requests>=2.31        # AI-council API calls (Gemini/NVIDIA/etc.)
+
+# ---- Math image fallback (used only when pandoc is absent) ----
+matplotlib>=3.8           # pulls numpy; renders LaTeX -> PNG via mathtext
+latex2mathml>=3.77        # LaTeX -> MathML (python-docx fallback path)
+
+# ---- OCR glue (the engine ALSO needs the external `tesseract` program) ----
+pytesseract>=0.3.13
+
+# ===================================================================
+# OPTIONAL heavy models. The app runs WITHOUT them (graceful fallback).
+# ===================================================================
+# opencv-python>=4.9            # image pre-processing for OCR/formulas
+# paddleocr>=2.7                # alternative OCR engine
+# pix2tex>=0.1.4                # LaTeX-OCR (image formula -> LaTeX; heavy, PyTorch)
+rapid-latex-ocr>=0.0.9          # LaTeX-OCR via ONNX (offline, NO PyTorch, no token) [recommended offline]
+# pix2text>=1.1                 # FULL offline pipeline (layout+table+text+formula -> Markdown)
+# easyocr>=1.7                  # Vietnamese text OCR for pix2text full-page (languages=vi,en)
+# docling>=2.0                  # advanced layout engine (DocLayNet-style)
