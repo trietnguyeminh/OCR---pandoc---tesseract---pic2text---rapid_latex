@@ -381,7 +381,7 @@ def _postprocess(md: str) -> str:
     # drop a now-orphaned solution heading left at the tail
     while out and re.sub(r"[*_#\\s]", "", out[-1]).lower() in ("hướngdẫngiải", "lờigiải"):
         out.pop()
-    return "\n\n".join(out).strip()
+    return docx_builder.normalize_dates("\n\n".join(out).strip())
 
 
 def run(pdf_path, options, out_path, settings, asset_dir, progress,

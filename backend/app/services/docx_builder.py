@@ -117,6 +117,27 @@ def _write_md_sidecar(document, options, out_path, stats) -> None:
         logger.warning("Could not write Markdown sidecar: %s", exc)
 
 
+_DATE_NUM = re.compile(r"(?<!\d)(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})(?!\d)")
+_DATE_VN = re.compile(r"ng\u00e0y\s+(\d{1,2})\s+th\u00e1ng\s+(\d{1,2})\s+n\u0103m\s+(\d{4})", re.I)
+
+
+def _fmt_date(d, m, y) -> str:
+    return f"{int(d):02d}/{int(m):02d}/{str(y)[-2:]}"
+
+
+def normalize_dates(text: str) -> str:
+    """Render every date as dd/mm/yy. Only unambiguous dates (4-digit year) are
+    touched, and never inside $...$ math, so fractions/expressions are safe."""
+    if not text:
+        return text
+    parts = re.split(r"(\$\$.+?\$\$|\$[^$\n]+\$)", text, flags=re.S)
+    for i in range(0, len(parts), 2):          # even = non-math segments
+        seg = _DATE_NUM.sub(lambda mm: _fmt_date(mm.group(1), mm.group(2), mm.group(3)), parts[i])
+        seg = _DATE_VN.sub(lambda mm: _fmt_date(mm.group(1), mm.group(2), mm.group(3)), seg)
+        parts[i] = seg
+    return "".join(parts)
+
+
 def build_markdown(document: DocumentModel, options: ConvertOptions) -> str:
     """A clean text+LaTeX Markdown of the document (no images). Saved as a .md
     sidecar so the user can read/edit/re-process the text separately."""
@@ -153,6 +174,9 @@ def build_markdown(document: DocumentModel, options: ConvertOptions) -> str:
 
 def build_docx(document: DocumentModel, options: ConvertOptions, out_path: str,
                settings: Settings) -> dict:
+    for _b in document.blocks:                 # dates -> dd/mm/yy (skip formulas)
+        if _b.type != BlockType.formula and _b.text:
+            _b.text = normalize_dates(_b.text)
     caps = capabilities()
     if caps.get("pandoc"):
         try:
