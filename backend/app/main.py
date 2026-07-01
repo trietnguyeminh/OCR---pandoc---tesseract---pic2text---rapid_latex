@@ -95,7 +95,8 @@ def convert_endpoint(req: ConvertRequest):
     pdf_path = settings.upload_dir / f"{req.file_id}.pdf"
     if not pdf_path.exists():
         raise HTTPException(404, "file_id not found — call /api/analyze-pdf first")
-    job = jobs.create(req.file_id, req.filename or f"{req.file_id}.pdf", req.options, req.api_keys)
+    job = jobs.create(req.file_id, req.filename or f"{req.file_id}.pdf", req.options,
+                      req.api_keys, req.output_format)
     return {"job_id": job.id, "status": job.status}
 
 

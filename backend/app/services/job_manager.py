@@ -37,6 +37,7 @@ class Job:
     error: Optional[str] = None
     out_path: Optional[str] = None
     xlsx_path: Optional[str] = None
+    output_format: str = "docx"
     saved_path: Optional[str] = None
     preview: Optional[str] = None
     created: float = field(default_factory=time.time)
@@ -51,9 +52,10 @@ class JobManager:
 
     # ---------------------------------------------------------------- #
     def create(self, file_id: str, filename: str, options: ConvertOptions,
-               api_keys: list | None = None) -> Job:
+               api_keys: list | None = None, output_format: str = "docx") -> Job:
         job = Job(id=uuid.uuid4().hex[:12], file_id=file_id,
-                  filename=filename, options=options, api_keys=api_keys or [])
+                  filename=filename, options=options, api_keys=api_keys or [],
+                  output_format=(output_format or "docx"))
         with self._lock:
             self._jobs[job.id] = job
         self._pool.submit(self._run, job.id)
@@ -122,36 +124,35 @@ class JobManager:
         return base + ".docx"
 
     def _save_to_downloads(self, job: "Job", out_path: str) -> Optional[str]:
-        """Desktop convenience: copy the result straight into ~/Downloads so the
-        user always gets the file even if the in-app browser blocks downloads."""
+        """Copy the result into ~/Downloads. Saves ONLY the format the user asked
+        for (Word .docx OR Excel .xlsx), plus the .md text sidecar -- it does not
+        dump the other format the user did not pick."""
         try:
             downloads = Path.home() / "Downloads"
             if not downloads.exists():
                 return None
-            name = self._safe_name(job.filename)
-            dest = downloads / name
+            base_no_ext = os.path.splitext(out_path)[0]
+            fmt = getattr(job, "output_format", "docx")
+            if fmt == "xlsx" and os.path.exists(base_no_ext + ".xlsx"):
+                primary_src, ext, label = base_no_ext + ".xlsx", ".xlsx", "Excel"
+            else:
+                primary_src, ext, label = out_path, ".docx", "Word"
+            stem = self._safe_name(job.filename)[:-5]        # drop ".docx"
+            dest = downloads / (stem + ext)
             i = 1
             while dest.exists():
-                dest = downloads / f"{name[:-5]} ({i}).docx"
+                dest = downloads / f"{stem} ({i}){ext}"
                 i += 1
-            shutil.copy(out_path, dest)
-            job.log.append(f"[saved] Word file saved to: {dest}")
+            shutil.copy(primary_src, dest)
+            job.log.append(f"[saved] {label} file saved to: {dest}")
             logger.info("Saved result to %s", dest)
-            # also copy the Markdown sidecar (clean text + LaTeX) if present
-            md_src = os.path.splitext(out_path)[0] + ".md"
+            # clean text markdown sidecar (small, useful for copy/re-processing)
+            md_src = base_no_ext + ".md"
             if os.path.exists(md_src):
                 md_dest = os.path.splitext(str(dest))[0] + ".md"
                 try:
                     shutil.copy(md_src, md_dest)
                     job.log.append(f"[saved] Markdown saved to: {md_dest}")
-                except Exception:
-                    pass
-            xlsx_src = os.path.splitext(out_path)[0] + ".xlsx"
-            if os.path.exists(xlsx_src):
-                xlsx_dest = os.path.splitext(str(dest))[0] + ".xlsx"
-                try:
-                    shutil.copy(xlsx_src, xlsx_dest)
-                    job.log.append(f"[saved] Excel saved to: {xlsx_dest}")
                 except Exception:
                     pass
             return str(dest)

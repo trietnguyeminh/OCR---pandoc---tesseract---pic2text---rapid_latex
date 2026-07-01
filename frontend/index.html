@@ -10,35 +10,63 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-    /* FormuDoc: adds Download .xlsx + Copy text next to the Word download (vanilla). */
+    /* FormuDoc: Convert-to-Excel (sets output_format), real blob downloads, Copy text. No icons. */
     (function(){
-      var CUR=null, origFetch=window.fetch;
-      window.fetch=function(){
-        var p=origFetch.apply(this, arguments);
+      var CUR=null, WANT_XLSX=false, PENDING_XLSX=false, NEED_FIX=false, origFetch=window.fetch;
+      window.fetch=function(input, init){
         try{
-          var a0=arguments[0], url=(typeof a0==='string')?a0:((a0&&a0.url)||'');
+          var url=(typeof input==='string')?input:((input&&input.url)||'');
+          if(WANT_XLSX && /\/api\/convert(\?|$)/.test(url) && init && typeof init.body==='string'){
+            try{ var o=JSON.parse(init.body); o.output_format='xlsx';
+                 init=Object.assign({}, init, {body:JSON.stringify(o)});
+                 PENDING_XLSX=true; WANT_XLSX=false; }catch(e){}
+          }
+          var p=origFetch.call(this, input, init);
           var m=url.match(/\/api\/jobs\/([A-Za-z0-9]+)/);
-          if(m){ p.then(function(res){ try{ res.clone().json().then(function(j){ if(j&&j.status==='done') CUR=m[1]; }).catch(function(){}); }catch(e){} }); }
-        }catch(e){}
-        return p;
+          if(m){ p.then(function(res){ try{ res.clone().json().then(function(j){
+            if(j && j.status==='done'){ CUR=m[1];
+              if(PENDING_XLSX){ PENDING_XLSX=false; NEED_FIX=true; setTimeout(function(){ dl('/api/download-xlsx/'+CUR); }, 600); }
+            }
+          }).catch(function(){}); }catch(e){} }); }
+          return p;
+        }catch(e){ return origFetch.apply(this, arguments); }
       };
-      function byText(re){ var bs=document.querySelectorAll('button,a'); for(var i=0;i<bs.length;i++){ if(re.test(bs[i].textContent||'')) return bs[i]; } return null; }
-      function ensureXlsxDl(){
-        var d=byText(/download\s*\.docx/i); if(!d || document.getElementById('fd-xlsx-dl')) return;
-        var x=document.createElement('button'); x.id='fd-xlsx-dl'; x.type='button'; x.textContent='\u2B07 Download .xlsx';
-        x.style.cssText='margin-left:10px;padding:12px 18px;border:none;border-radius:10px;background:#1f9d55;color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer';
-        x.onclick=function(){ if(CUR){ window.location='/api/download-xlsx/'+CUR; } };
-        d.parentNode.insertBefore(x, d.nextSibling);
+      function dl(url, btn){
+        var old=btn?btn.textContent:null; if(btn) btn.textContent='Đang tải…';
+        return origFetch(url).then(function(r){
+          if(!r.ok) throw new Error(r.status);
+          var fn='FormuDoc'; var cd=r.headers.get('Content-Disposition');
+          if(cd){ var mm=cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i); if(mm){ try{ fn=decodeURIComponent(mm[1]); }catch(e){ fn=mm[1]; } } }
+          return r.blob().then(function(b){
+            var u=URL.createObjectURL(b), a=document.createElement('a');
+            a.href=u; a.download=fn; document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
+            if(btn) btn.textContent=old;
+          });
+        }).catch(function(){ if(btn) btn.textContent=old; });
       }
-      function ensureCopy(){
-        var d=byText(/download\s*\.docx/i); if(!d || document.getElementById('fd-copy-btn')) return;
-        var b=document.createElement('button'); b.id='fd-copy-btn'; b.type='button'; b.textContent='\uD83D\uDCCB Copy text';
-        b.style.cssText='margin-left:10px;padding:12px 18px;border:none;border-radius:10px;background:#6d5efc;color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer';
-        b.onclick=function(){ if(!CUR) return; origFetch('/api/markdown/'+CUR).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(t){ return navigator.clipboard.writeText(t); }).then(function(){ b.textContent='\u2713 \u0110\u00E3 copy'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},1500); }).catch(function(){ b.textContent='\u26A0 L\u1ED7i'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},1500); }); };
-        d.parentNode.insertBefore(b, d.nextSibling);
+      function byText(re){ var bs=document.querySelectorAll('button,a'); for(var i=0;i<bs.length;i++){ if(re.test(bs[i].textContent||'')) return bs[i]; } return null; }
+      function mkBtn(id,label,bg){ var b=document.createElement('button'); b.id=id; b.type='button'; b.textContent=label;
+        b.style.cssText='margin-left:10px;padding:12px 18px;border:none;border-radius:10px;background:'+bg+';color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer'; return b; }
+      function ensureConvertExcel(){
+        var cb=byText(/convert to word/i); if(!cb || document.getElementById('fd-xlsx-convert')) return;
+        var x=document.createElement('button'); x.id='fd-xlsx-convert'; x.type='button'; x.textContent='Convert to Excel';
+        x.style.cssText='display:block;width:100%;margin-top:10px;padding:16px;border:none;border-radius:14px;background:#1f9d55;color:#fff;font:700 17px system-ui,sans-serif;cursor:pointer';
+        x.onclick=function(){ WANT_XLSX=true; x.textContent='Đang chuyển sang Excel…'; cb.click(); setTimeout(function(){ x.textContent='Convert to Excel'; }, 9000); };
+        cb.parentNode.insertBefore(x, cb.nextSibling);
+      }
+      function ensureResultBtns(){
+        var d=byText(/download\s*\.docx/i); if(!d) return;
+        if(!document.getElementById('fd-xlsx-dl')){ var x=mkBtn('fd-xlsx-dl','Download .xlsx','#1f9d55'); x.onclick=function(){ if(CUR) dl('/api/download-xlsx/'+CUR, x); }; d.parentNode.insertBefore(x, d.nextSibling); }
+        if(!document.getElementById('fd-copy-btn')){ var b=mkBtn('fd-copy-btn','Copy text','#6d5efc'); b.onclick=function(){ if(!CUR) return; origFetch('/api/markdown/'+CUR).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(t){ return navigator.clipboard.writeText(t); }).then(function(){ b.textContent='Đã copy'; setTimeout(function(){b.textContent='Copy text';},1500); }).catch(function(){ b.textContent='Lỗi copy'; setTimeout(function(){b.textContent='Copy text';},1500); }); }; d.parentNode.insertBefore(b, d.nextSibling); }
+      }
+      function fixLabel(){
+        if(!NEED_FIX) return;
+        var ns=document.querySelectorAll('div,span,p,h1,h2,h3,h4,strong');
+        for(var i=0;i<ns.length;i++){ var n=ns[i]; if(n.children.length===0 && /file Word/i.test(n.textContent||'')){ n.textContent=n.textContent.replace(/file Word/ig,'file Excel'); NEED_FIX=false; break; } }
       }
       var pend=false;
-      function tick(){ pend=false; try{ ensureXlsxDl(); ensureCopy(); }catch(e){} }
+      function tick(){ pend=false; try{ ensureConvertExcel(); ensureResultBtns(); fixLabel(); }catch(e){} }
       function schedule(){ if(pend) return; pend=true; setTimeout(tick,250); }
       if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',tick); else tick();
       new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true});

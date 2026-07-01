@@ -70,7 +70,11 @@ _CONVERT = (
     "closest hex colour (e.g. red heading -> #C00000, blue -> #0070C0). Black / "
     "default text: NO span. Do not colour anything that is actually black.\n"
     "- Write every formula as LaTeX ($...$ inline, $$...$$ display).\n"
-    "- Preserve reading order, line breaks, and tables (as Markdown tables).\n"
+    "- Preserve reading order and line breaks.\n"
+    "- If the page is a TABLE / list / roster / grade sheet, output it as a "
+    "PROPER Markdown table: a header row, then a |---| separator, then ONE row "
+    "per record with every column aligned (STT, họ tên, ngày sinh, ... each in "
+    "its own column). Do not merge columns into one cell.\n"
     "Output ONLY the page's Markdown, with no preamble or trailing notes."
 )
 _CRITIC = (
@@ -287,10 +291,29 @@ def _alive_distinct(seats, dead) -> int:
     return len({seats[i][0] for i in alive})
 
 
+def _extract_table_header(md: str):
+    """Return the first Markdown table header row (a `| a | b |` line) or None."""
+    for line in (md or "").split("\n"):
+        s = line.strip()
+        if s.startswith("|") and s.count("|") >= 2 and not _re.fullmatch(r"\|[-:\s|]+\|", s):
+            return s
+    return None
+
+
 def _debate_page(image_b64: str, seats, rounds: int, page_no: int = 0,
-                 log=lambda m: None, tally=None, dead=None, strikes=None) -> str:
+                 log=lambda m: None, tally=None, dead=None, strikes=None,
+                 table_hint=None) -> str:
     lbl = lambda i: f"seat{i+1}({seats[i][0]})"
-    resp, ridx = _ask(seats, 0, _CONVERT, image_b64, log, "reader", tally, dead, strikes)
+    reader_prompt = _CONVERT
+    if table_hint:
+        reader_prompt = _CONVERT + (
+            "\n\nCONTEXT — column consistency: an earlier page held a table whose "
+            "header row is:\n" + table_hint + "\nIf THIS page CONTINUES that same "
+            "table (more rows of the same roster/list), reuse EXACTLY these column "
+            "headers, in this exact order and count, and start the page's table with "
+            "this same header row, so all pages stack into ONE aligned table. Only "
+            "use different columns if this page is clearly a different table.")
+    resp, ridx = _ask(seats, 0, reader_prompt, image_b64, log, "reader", tally, dead, strikes)
     if resp is None:
         log(f"page {page_no}: ALL reader seats failed (check keys/quota)")
         return ""
@@ -402,6 +425,7 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
     progress(4, "council", f"AI council: {len(seats)} seat(s) [{provs}] — {mode_txt}")
 
     parts, n_formula, ok_pages = [], 0, 0
+    table_hint = None   # last table header, reused to keep columns consistent
     tally = {}   # provider -> token usage accumulator
     dead = set()      # seat indices disabled mid-run (quota/auth)
     strikes = {}      # seat -> consecutive timeout count
@@ -416,7 +440,8 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
             page_log = lambda m, _p=pct: progress(_p, "council", m)
             try:
                 md = _debate_page(_b64(img), seats, eff_rounds, page_no=i + 1,
-                                  log=page_log, tally=tally, dead=dead, strikes=strikes)
+                                  log=page_log, tally=tally, dead=dead,
+                                  strikes=strikes, table_hint=table_hint)
             except Exception as exc:  # pragma: no cover
                 logger.warning("council page %d failed: %s", i, exc)
                 md = ""
@@ -424,6 +449,9 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
                 ok_pages += 1
             n_formula += _count_formulas(md)
             parts.append(md)
+            _h = _extract_table_header(md)      # thread columns to the next page
+            if _h:
+                table_hint = _h
 
     markdown = ("\n\n" + docx_builder._pagebreak() + "\n\n").join(p for p in parts if p.strip())
     markdown = _postprocess(markdown)

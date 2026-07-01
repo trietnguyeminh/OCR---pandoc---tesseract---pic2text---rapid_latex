@@ -8,10 +8,22 @@ REM ============================================================
 setlocal
 cd /d "%~dp0"
 
-REM Prefer Python 3.12 (widest wheel coverage); else 3.11; else default python.
-set "PY=python"
-py -3.12 --version >nul 2>nul && set "PY=py -3.12"
-if "%PY%"=="python" ( py -3.11 --version >nul 2>nul && set "PY=py -3.11" )
+REM Find a REAL Python and AVOID the Microsoft Store "python" alias stub.
+REM Try the py launcher first, then a working `python`, then pythoncore in LocalAppData.
+set "PY="
+if not defined PY ( py -3.12 --version >nul 2>nul && set "PY=py -3.12" )
+if not defined PY ( py -3.11 --version >nul 2>nul && set "PY=py -3.11" )
+if not defined PY ( py -3    --version >nul 2>nul && set "PY=py -3" )
+if not defined PY ( python   --version >nul 2>nul && set "PY=python" )
+if not defined PY ( for /d %%D in ("%LOCALAPPDATA%\Python\pythoncore-*") do @if exist "%%D\python.exe" set PY="%%D\python.exe" )
+if not defined PY (
+  echo ERROR: No real Python found -- 'python' is the Microsoft Store stub.
+  echo Fix either way, then re-run:
+  echo   1^) Install Python 3.12 from https://www.python.org/downloads/ ^(tick "Add to PATH"^), or
+  echo   2^) Settings ^> Apps ^> Advanced app settings ^> App execution aliases ^>
+  echo      turn OFF python.exe and python3.exe.
+  goto :err
+)
 
 echo Using interpreter:
 %PY% --version

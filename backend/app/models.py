@@ -104,6 +104,7 @@ class ConvertRequest(BaseModel):
     filename: Optional[str] = None        # original upload name (for nice output name)
     api_keys: list[str] = Field(default_factory=list)   # AI council keys ("provider:key")
     options: ConvertOptions = Field(default_factory=ConvertOptions)
+    output_format: str = "docx"          # "docx" (Word) or "xlsx" (Excel)
 
 
 class ConversionReport(BaseModel):
