@@ -10,7 +10,7 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-    /* FormuDoc: Convert-to-Excel (sets output_format), real blob downloads, Copy text. No icons. */
+    /* FormuDoc: Convert-to-Excel (output_format), blob downloads, Copy text/log. No icons. */
     (function(){
       var CUR=null, WANT_XLSX=false, PENDING_XLSX=false, NEED_FIX=false, origFetch=window.fetch;
       window.fetch=function(input, init){
@@ -45,6 +45,11 @@
           });
         }).catch(function(){ if(btn) btn.textContent=old; });
       }
+      function copyTo(btn, text){
+        (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+          .then(function(){ var o=btn.textContent; btn.textContent='Đã copy'; setTimeout(function(){btn.textContent=o;},1500); })
+          .catch(function(){ var o=btn.textContent; btn.textContent='Lỗi copy'; setTimeout(function(){btn.textContent=o;},1500); });
+      }
       function byText(re){ var bs=document.querySelectorAll('button,a'); for(var i=0;i<bs.length;i++){ if(re.test(bs[i].textContent||'')) return bs[i]; } return null; }
       function mkBtn(id,label,bg){ var b=document.createElement('button'); b.id=id; b.type='button'; b.textContent=label;
         b.style.cssText='margin-left:10px;padding:12px 18px;border:none;border-radius:10px;background:'+bg+';color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer'; return b; }
@@ -58,7 +63,8 @@
       function ensureResultBtns(){
         var d=byText(/download\s*\.docx/i); if(!d) return;
         if(!document.getElementById('fd-xlsx-dl')){ var x=mkBtn('fd-xlsx-dl','Download .xlsx','#1f9d55'); x.onclick=function(){ if(CUR) dl('/api/download-xlsx/'+CUR, x); }; d.parentNode.insertBefore(x, d.nextSibling); }
-        if(!document.getElementById('fd-copy-btn')){ var b=mkBtn('fd-copy-btn','Copy text','#6d5efc'); b.onclick=function(){ if(!CUR) return; origFetch('/api/markdown/'+CUR).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(t){ return navigator.clipboard.writeText(t); }).then(function(){ b.textContent='Đã copy'; setTimeout(function(){b.textContent='Copy text';},1500); }).catch(function(){ b.textContent='Lỗi copy'; setTimeout(function(){b.textContent='Copy text';},1500); }); }; d.parentNode.insertBefore(b, d.nextSibling); }
+        if(!document.getElementById('fd-copy-btn')){ var b=mkBtn('fd-copy-btn','Copy text','#6d5efc'); b.onclick=function(){ if(!CUR) return; origFetch('/api/markdown/'+CUR).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(t){ copyTo(b,t); }).catch(function(){ b.textContent='Lỗi copy'; setTimeout(function(){b.textContent='Copy text';},1500); }); }; d.parentNode.insertBefore(b, d.nextSibling); }
+        if(!document.getElementById('fd-copylog-btn')){ var g=mkBtn('fd-copylog-btn','Copy log','#334155'); g.onclick=function(){ if(!CUR) return; origFetch('/api/jobs/'+CUR).then(function(r){ return r.json(); }).then(function(j){ copyTo(g, (j.log||[]).join('\n')); }).catch(function(){ g.textContent='Lỗi copy'; setTimeout(function(){g.textContent='Copy log';},1500); }); }; d.parentNode.insertBefore(g, d.nextSibling); }
       }
       function fixLabel(){
         if(!NEED_FIX) return;

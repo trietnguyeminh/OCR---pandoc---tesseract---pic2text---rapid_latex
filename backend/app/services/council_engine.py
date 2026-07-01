@@ -425,6 +425,8 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
     progress(4, "council", f"AI council: {len(seats)} seat(s) [{provs}] — {mode_txt}")
 
     parts, n_formula, ok_pages = [], 0, 0
+    ai_pages, ocr_pages = 0, 0        # AI-read pages vs offline-OCR-filled pages
+    _ocr = [None]                     # lazy offline OCR engine (per-page fallback)
     table_hint = None   # last table header, reused to keep columns consistent
     tally = {}   # provider -> token usage accumulator
     dead = set()      # seat indices disabled mid-run (quota/auth)
@@ -447,6 +449,24 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
                 md = ""
             if md.strip():
                 ok_pages += 1
+                ai_pages += 1
+            else:
+                # HYBRID: don't throw away the good AI pages. OCR just THIS failed
+                # page (offline) so it isn't empty and the AI pages survive.
+                try:
+                    if _ocr[0] is None:
+                        from .ocr_engine import get_ocr_engine
+                        _ocr[0] = get_ocr_engine()
+                    _lines = _ocr[0].ocr_image(img)
+                    _txt = "\n".join(l.text for l in _lines if (l.text or "").strip())
+                    if _txt.strip():
+                        md = _txt
+                        ok_pages += 1
+                        ocr_pages += 1
+                        page_log(f"page {i + 1}: AI empty -> filled by offline OCR "
+                                 f"({len(_txt)} chars)")
+                except Exception as _e:  # pragma: no cover
+                    logger.warning("per-page OCR fallback failed: %s", _e)
             n_formula += _count_formulas(md)
             parts.append(md)
             _h = _extract_table_header(md)      # thread columns to the next page
@@ -461,12 +481,13 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
     # timeouts), we do NOT ship a half-finished document. We abort so the
     # pipeline falls back to the standard OFFLINE pipeline, which reliably
     # converts ALL pages. (This also covers the "0-byte Word" case.)
-    if ok_pages < n or len(markdown.strip()) < 5:
+    # Only fall back to the whole-document offline pipeline if the AI produced
+    # NOTHING usable. If it read at least one page, we keep those pages and the
+    # rest were OCR-filled above -> the AI work is never wasted.
+    if ai_pages == 0 or len(markdown.strip()) < 5:
         raise RuntimeError(
-            f"AI council converted only {ok_pages}/{n} page(s) (seats: {provs}) — "
-            "likely exhausted API quota/tokens or dead seats mid-document. "
-            "Refusing to output a partial document; falling back to the standard "
-            "offline pipeline so ALL pages are converted.")
+            f"AI council produced no usable page (seats: {provs}) — exhausted "
+            "quota/tokens or dead seats. Falling back to the offline pipeline.")
 
     progress(92, "build", "Building Word + Markdown from council output")
     docx_builder.markdown_to_docx(markdown, out_path, settings)
@@ -484,6 +505,9 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
     report.engines_used = {"recognizer": f"council({len(seats)} seats: {provs})",
                            "docx": "pandoc"}
     warn = [f"AI council: {len(seats)} seat(s) [{provs}] — {mode_txt}."]
+    if ocr_pages:
+        warn.append(f"{ai_pages}/{n} page(s) read by AI; {ocr_pages} page(s) "
+                    "filled by offline OCR (AI quota/timeout on those pages).")
     grand = 0
     for prov, u in sorted(tally.items()):
         grand += u["total"]
