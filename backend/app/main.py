@@ -130,6 +130,21 @@ def report(job_id: str):
     return job.report.model_dump()
 
 
+@app.get("/api/markdown/{job_id}")
+def markdown(job_id: str):
+    """Return the converted document as plain Markdown text (for copy-in-app)."""
+    import os as _os
+    from fastapi.responses import PlainTextResponse
+    job = jobs.get(job_id)
+    if not job or job.status != JobStatus.done or not job.out_path:
+        raise HTTPException(404, "result not ready")
+    md_path = _os.path.splitext(job.out_path)[0] + ".md"
+    if not _os.path.exists(md_path):
+        raise HTTPException(404, "no markdown for this job")
+    with open(md_path, encoding="utf-8") as fh:
+        return PlainTextResponse(fh.read(), media_type="text/markdown; charset=utf-8")
+
+
 # --------------------------------------------------------------------------- #
 #  Serve the built React UI from the same origin (single-app mode).
 #  Registered LAST so /health and /api/* always take precedence.

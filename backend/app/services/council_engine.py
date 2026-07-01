@@ -422,17 +422,17 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
     markdown = ("\n\n" + docx_builder._pagebreak() + "\n\n").join(p for p in parts if p.strip())
     markdown = _postprocess(markdown)
 
-    # NEVER emit an empty document. If every seat failed (bad key / wrong
-    # provider prefix / non-vision model / quota), abort the council so the
-    # pipeline falls back to the standard text-layer + OCR route, which always
-    # produces real content. This prevents the "0-byte Word" outcome.
-    if ok_pages == 0 or len(markdown.strip()) < 5:
+    # MANDATORY RULE: the AI council must convert EVERY page. If even one page
+    # came back empty (API quota/tokens ran out, seats died mid-document, or
+    # timeouts), we do NOT ship a half-finished document. We abort so the
+    # pipeline falls back to the standard OFFLINE pipeline, which reliably
+    # converts ALL pages. (This also covers the "0-byte Word" case.)
+    if ok_pages < n or len(markdown.strip()) < 5:
         raise RuntimeError(
-            "AI council produced no text on any page — every model seat failed "
-            f"(seats: {provs}). Common causes: wrong provider prefix (e.g. an "
-            "NVIDIA key entered without 'nvidia:'), a text-only model used as a "
-            "vision seat, an invalid key, or exhausted quota. Falling back to the "
-            "standard offline pipeline so the document is never empty.")
+            f"AI council converted only {ok_pages}/{n} page(s) (seats: {provs}) — "
+            "likely exhausted API quota/tokens or dead seats mid-document. "
+            "Refusing to output a partial document; falling back to the standard "
+            "offline pipeline so ALL pages are converted.")
 
     progress(92, "build", "Building Word + Markdown from council output")
     docx_builder.markdown_to_docx(markdown, out_path, settings)
