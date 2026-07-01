@@ -69,6 +69,26 @@ def build_reference_doc(path: str) -> str:
 # --------------------------------------------------------------------------- #
 #  Backend selection
 # --------------------------------------------------------------------------- #
+def _spans_to_openxml(md: str) -> str:
+    """Convert AI color spans <span style="color:#RRGGBB">text</span> into inline
+    raw-openxml runs so pandoc emits real coloured runs in the .docx. Text that
+    contains math/code/newlines is left as plain text (color dropped) to avoid
+    breaking LaTeX conversion."""
+    import re, html as _html
+    pat = re.compile(
+        r'<span\s+style\s*=\s*["\'][^"\']*color\s*:\s*#?([0-9A-Fa-f]{6})[^"\']*["\']\s*>(.*?)</span>',
+        re.S | re.I)
+
+    def repl(m):
+        hexv, text = m.group(1), m.group(2)
+        if ("$" in text) or ("`" in text) or ("\n" in text) or ("<" in text):
+            return text  # keep plain; don't break math/code
+        t = _html.escape(text, quote=False)
+        return (f'`<w:r><w:rPr><w:color w:val="{hexv.upper()}"/></w:rPr>'
+                f'<w:t xml:space="preserve">{t}</w:t></w:r>`{{=openxml}}')
+    return pat.sub(repl, md or "")
+
+
 def markdown_to_docx(markdown: str, out_path: str, settings: Settings) -> None:
     """Render a Markdown string (text + $...$ math + tables) to .docx via pandoc.
     Used by the Pix2Text full-page path."""
@@ -78,7 +98,7 @@ def markdown_to_docx(markdown: str, out_path: str, settings: Settings) -> None:
     work = tempfile.mkdtemp(prefix="formudoc_md_")
     try:
         ref = build_reference_doc(os.path.join(work, "reference.docx"))
-        pypandoc.convert_text(markdown or "(empty)", "docx", format="markdown",
+        pypandoc.convert_text(_spans_to_openxml(markdown) or "(empty)", "docx", format="markdown",
                               outputfile=out_path,
                               extra_args=["--reference-doc", ref, "--wrap=preserve"])
     finally:
