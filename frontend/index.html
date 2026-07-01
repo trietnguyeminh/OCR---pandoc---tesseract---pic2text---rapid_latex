@@ -10,7 +10,7 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-    /* FormuDoc: in-app "Copy text" button (vanilla, no bundle change). */
+    /* FormuDoc: adds Download .xlsx + Copy text next to the Word download (vanilla). */
     (function(){
       var CUR=null, origFetch=window.fetch;
       window.fetch=function(){
@@ -22,26 +22,26 @@
         }catch(e){}
         return p;
       };
-      function addBtn(){
-        if(document.getElementById('fd-copy-btn')) return;
-        var b=document.createElement('button');
-        b.id='fd-copy-btn'; b.type='button'; b.textContent='\uD83D\uDCCB Copy text';
-        b.style.cssText='position:fixed;bottom:20px;right:20px;z-index:99999;padding:10px 16px;border:none;border-radius:10px;background:#6d5efc;color:#fff;font:600 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)';
-        b.onclick=function(){
-          if(!CUR){ b.textContent='\u23F3 Ch\u01B0a c\u00F3 b\u1EA3n ho\u00E0n t\u1EA5t'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},1500); return; }
-          origFetch('/api/markdown/'+CUR).then(function(r){ if(!r.ok) throw new Error(r.status); return r.text(); })
-            .then(function(t){ return navigator.clipboard.writeText(t); })
-            .then(function(){ b.textContent='\u2713 \u0110\u00E3 copy!'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},1500); })
-            .catch(function(){ b.textContent='\u26A0 L\u1ED7i copy'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},2000); });
-        };
-        document.body.appendChild(b);
-        var e=document.createElement('button');
-        e.id='fd-xlsx-btn'; e.type='button'; e.textContent='\u2B07 Excel';
-        e.style.cssText='position:fixed;bottom:20px;right:150px;z-index:99999;padding:10px 16px;border:none;border-radius:10px;background:#1f9d55;color:#fff;font:600 14px system-ui,sans-serif;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.25)';
-        e.onclick=function(){ if(!CUR){ e.textContent='\u23F3 Ch\u01B0a xong'; setTimeout(function(){e.textContent='\u2B07 Excel';},1500); return; } window.location='/api/download-xlsx/'+CUR; };
-        document.body.appendChild(e);
+      function byText(re){ var bs=document.querySelectorAll('button,a'); for(var i=0;i<bs.length;i++){ if(re.test(bs[i].textContent||'')) return bs[i]; } return null; }
+      function ensureXlsxDl(){
+        var d=byText(/download\s*\.docx/i); if(!d || document.getElementById('fd-xlsx-dl')) return;
+        var x=document.createElement('button'); x.id='fd-xlsx-dl'; x.type='button'; x.textContent='\u2B07 Download .xlsx';
+        x.style.cssText='margin-left:10px;padding:12px 18px;border:none;border-radius:10px;background:#1f9d55;color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer';
+        x.onclick=function(){ if(CUR){ window.location='/api/download-xlsx/'+CUR; } };
+        d.parentNode.insertBefore(x, d.nextSibling);
       }
-      if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', addBtn); else addBtn();
+      function ensureCopy(){
+        var d=byText(/download\s*\.docx/i); if(!d || document.getElementById('fd-copy-btn')) return;
+        var b=document.createElement('button'); b.id='fd-copy-btn'; b.type='button'; b.textContent='\uD83D\uDCCB Copy text';
+        b.style.cssText='margin-left:10px;padding:12px 18px;border:none;border-radius:10px;background:#6d5efc;color:#fff;font:600 15px system-ui,sans-serif;cursor:pointer';
+        b.onclick=function(){ if(!CUR) return; origFetch('/api/markdown/'+CUR).then(function(r){ if(!r.ok) throw 0; return r.text(); }).then(function(t){ return navigator.clipboard.writeText(t); }).then(function(){ b.textContent='\u2713 \u0110\u00E3 copy'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},1500); }).catch(function(){ b.textContent='\u26A0 L\u1ED7i'; setTimeout(function(){b.textContent='\uD83D\uDCCB Copy text';},1500); }); };
+        d.parentNode.insertBefore(b, d.nextSibling);
+      }
+      var pend=false;
+      function tick(){ pend=false; try{ ensureXlsxDl(); ensureCopy(); }catch(e){} }
+      function schedule(){ if(pend) return; pend=true; setTimeout(tick,250); }
+      if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',tick); else tick();
+      new MutationObserver(schedule).observe(document.documentElement,{childList:true,subtree:true});
     })();
     </script>
   </body>
