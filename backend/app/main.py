@@ -145,6 +145,20 @@ def markdown(job_id: str):
         return PlainTextResponse(fh.read(), media_type="text/markdown; charset=utf-8")
 
 
+@app.get("/api/download-xlsx/{job_id}")
+def download_xlsx(job_id: str):
+    """Download the PDF-to-Excel (.xlsx) rows-of-text file."""
+    job = jobs.get(job_id)
+    if not job or job.status != JobStatus.done or not getattr(job, "xlsx_path", None):
+        raise HTTPException(404, "excel not ready")
+    name = job.filename.replace(".pdf", "") + ".xlsx"
+    return FileResponse(
+        job.xlsx_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=name,
+    )
+
+
 # --------------------------------------------------------------------------- #
 #  Serve the built React UI from the same origin (single-app mode).
 #  Registered LAST so /health and /api/* always take precedence.

@@ -36,6 +36,7 @@ class Job:
     report: Optional[ConversionReport] = None
     error: Optional[str] = None
     out_path: Optional[str] = None
+    xlsx_path: Optional[str] = None
     saved_path: Optional[str] = None
     preview: Optional[str] = None
     created: float = field(default_factory=time.time)
@@ -87,6 +88,18 @@ class JobManager:
             )
             job.report = report
             job.out_path = out_path
+            # PDF -> Excel: rows of text (built from the .md the pipeline wrote)
+            try:
+                import os as _os
+                md_src = _os.path.splitext(out_path)[0] + ".md"
+                if _os.path.exists(md_src):
+                    from . import xlsx_builder
+                    xlsx_path = _os.path.splitext(out_path)[0] + ".xlsx"
+                    with open(md_src, encoding="utf-8") as _fh:
+                        xlsx_builder.build_xlsx_from_markdown(_fh.read(), xlsx_path)
+                    job.xlsx_path = xlsx_path
+            except Exception as _exc:  # noqa: BLE001
+                logger.warning("Excel build skipped: %s", _exc)
             job.saved_path = self._save_to_downloads(job, out_path)
             job.preview = self._make_preview(report)
             # persist report
@@ -131,6 +144,14 @@ class JobManager:
                 try:
                     shutil.copy(md_src, md_dest)
                     job.log.append(f"[saved] Markdown saved to: {md_dest}")
+                except Exception:
+                    pass
+            xlsx_src = os.path.splitext(out_path)[0] + ".xlsx"
+            if os.path.exists(xlsx_src):
+                xlsx_dest = os.path.splitext(str(dest))[0] + ".xlsx"
+                try:
+                    shutil.copy(xlsx_src, xlsx_dest)
+                    job.log.append(f"[saved] Excel saved to: {xlsx_dest}")
                 except Exception:
                     pass
             return str(dest)

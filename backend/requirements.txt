@@ -38,7 +38,9 @@ pytesseract>=0.3.13
 # opencv-python>=4.9            # image pre-processing for OCR/formulas
 # paddleocr>=2.7                # alternative OCR engine
 # pix2tex>=0.1.4                # LaTeX-OCR (image formula -> LaTeX; heavy, PyTorch)
-rapid-latex-ocr>=0.0.9          # LaTeX-OCR via ONNX (offline, NO PyTorch, no token) [recommended offline]
+# rapid-latex-ocr is VENDORED at backend/app/vendor/rapid_latex_ocr (works on
+# Python 3.13+ where the PyPI package refuses to install). Do NOT pip-install it.
 # pix2text>=1.1                 # FULL offline pipeline (layout+table+text+formula -> Markdown)
 # easyocr>=1.7                  # Vietnamese text OCR for pix2text full-page (languages=vi,en)
 # docling>=2.0                  # advanced layout engine (DocLayNet-style)
+openpyxl>=3.1        # PDF -> Excel (text rows)
