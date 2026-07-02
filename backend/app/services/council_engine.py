@@ -162,8 +162,30 @@ def _usage(provider: str, j: dict) -> dict:
     return {"prompt": p, "completion": c, "total": t}
 
 
+def _mask(key: str) -> str:
+    key = key or ""
+    return (key[:6] + "\u2026" + key[-4:]) if len(key) > 12 else (key[:3] + "\u2026")
+
+
+def _rl_from(r) -> dict:
+    """Rate-limit info from OpenAI-compatible response headers (Groq/etc.).
+    remaining-requests is usually the DAILY quota; remaining-tokens the current
+    (often per-minute) window. Gemini/Anthropic do not expose these."""
+    h = getattr(r, "headers", {}) or {}
+    def _n(k):
+        v = h.get(k)
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return None
+    return {"rem_tokens": _n("x-ratelimit-remaining-tokens"),
+            "lim_tokens": _n("x-ratelimit-limit-tokens"),
+            "rem_req": _n("x-ratelimit-remaining-requests"),
+            "lim_req": _n("x-ratelimit-limit-requests")}
+
+
 def _vision(seat, prompt: str, image_b64: str, timeout: int = None):
-    """Return (text, usage). usage = {prompt, completion, total} token counts."""
+    """Return (text, usage, rl). rl = rate-limit headers ({} if none)."""
     import requests
     timeout = timeout or _TIMEOUT
     provider, key = seat
@@ -177,7 +199,7 @@ def _vision(seat, prompt: str, image_b64: str, timeout: int = None):
         r = requests.post(url, params={"key": key}, json=body, timeout=timeout)
         r.raise_for_status()
         j = r.json()
-        return j["candidates"][0]["content"]["parts"][0]["text"], _usage(provider, j)
+        return j["candidates"][0]["content"]["parts"][0]["text"], _usage(provider, j), {}
     if provider in _OAI:
         import os
         base, env_model, default_model = _OAI[provider]
@@ -192,7 +214,7 @@ def _vision(seat, prompt: str, image_b64: str, timeout: int = None):
                           timeout=timeout)
         r.raise_for_status()
         j = r.json()
-        return j["choices"][0]["message"]["content"], _usage(provider, j)
+        return j["choices"][0]["message"]["content"], _usage(provider, j), _rl_from(r)
     if provider == "anthropic":
         r = requests.post("https://api.anthropic.com/v1/messages",
                           headers={"x-api-key": key,
@@ -207,7 +229,7 @@ def _vision(seat, prompt: str, image_b64: str, timeout: int = None):
                           timeout=timeout)
         r.raise_for_status()
         j = r.json()
-        return j["content"][0]["text"], _usage(provider, j)
+        return j["content"][0]["text"], _usage(provider, j), {}
     raise ValueError(f"unknown provider: {provider}")
 
 
@@ -252,14 +274,18 @@ def _ask(seats, start, prompt, image_b64, log, role, tally=None, dead=None, stri
             continue
         prov = seats[idx][0]
         try:
-            t, usage = _vision(seats[idx], prompt, image_b64)
-            if tally is not None and usage:
-                acc = tally.setdefault(prov, {"prompt": 0, "completion": 0,
-                                              "total": 0, "calls": 0})
-                acc["prompt"] += usage["prompt"]
-                acc["completion"] += usage["completion"]
-                acc["total"] += usage["total"]
-                acc["calls"] += 1
+            t, usage, rl = _vision(seats[idx], prompt, image_b64)
+            if tally is not None:
+                acc = tally.setdefault(idx, {"provider": prov, "key": seats[idx][1],
+                                             "prompt": 0, "completion": 0,
+                                             "total": 0, "calls": 0, "rl": {}})
+                if usage:
+                    acc["prompt"] += usage["prompt"]
+                    acc["completion"] += usage["completion"]
+                    acc["total"] += usage["total"]
+                    acc["calls"] += 1
+                if rl and any(v is not None for v in rl.values()):
+                    acc["rl"] = rl
             if t and t.strip():
                 if usage and usage["total"]:
                     log(f"   ↳ {role} seat{idx+1}({prov}) tokens: {usage['total']}"
@@ -508,15 +534,50 @@ def run(pdf_path, options, out_path, settings, asset_dir, progress,
     if ocr_pages:
         warn.append(f"{ai_pages}/{n} page(s) read by AI; {ocr_pages} page(s) "
                     "filled by offline OCR (AI quota/timeout on those pages).")
-    grand = 0
-    for prov, u in sorted(tally.items()):
+    # per-provider token totals (aggregated from per-seat tally)
+    prov_tot, grand = {}, 0
+    for _idx, u in tally.items():
         grand += u["total"]
+        pt = prov_tot.setdefault(u["provider"], {"prompt": 0, "completion": 0,
+                                                 "total": 0, "calls": 0})
+        for k2 in ("prompt", "completion", "total", "calls"):
+            pt[k2] += u[k2]
+    for prov, u in sorted(prov_tot.items()):
         line = (f"Tokens · {prov}: {u['total']:,} total "
                 f"(in {u['prompt']:,} + out {u['completion']:,}) over {u['calls']} call(s)")
         warn.append(line)
         progress(97, "build", line)
     if grand:
         progress(97, "build", f"Total tokens used this conversion: {grand:,}")
+    # per-KEY remaining-quota estimate (uses real rate-limit headers when present)
+    try:
+        _sz = os.path.getsize(pdf_path)
+        size_str = f"{_sz/1048576:.1f} MB" if _sz >= 1048576 else f"{_sz/1024:.0f} KB"
+    except Exception:
+        size_str = "?"
+    for idx in sorted(tally):
+        u = tally[idx]
+        if u["total"] == 0:
+            continue
+        mk, prov = _mask(u["key"]), u["provider"]
+        rl = u.get("rl") or {}
+        rt, rr = rl.get("rem_tokens"), rl.get("rem_req")
+        if rr is not None and u["calls"]:
+            nleft = max(0, rr // max(u["calls"], 1))
+            kline = (f'KEY: "{mk}" ({prov}) của bạn còn dùng được ~{nleft} lần với '
+                     f'dữ liệu tầm {size_str} (còn {rr} request/ngày; lần này dùng '
+                     f'{u["calls"]} request, {u["total"]:,} token)')
+        elif rt is not None and u["total"]:
+            nleft = max(0, rt // max(u["total"], 1))
+            kline = (f'KEY: "{mk}" ({prov}) của bạn còn dùng được ~{nleft} lần với '
+                     f'dữ liệu tầm {size_str} (còn {rt:,} token trong cửa sổ hiện tại; '
+                     f'lần này dùng {u["total"]:,} token)')
+        else:
+            kline = (f'KEY: "{mk}" ({prov}) — nhà cung cấp không trả hạn mức còn lại; '
+                     f'lần này dùng {u["total"]:,} token qua {u["calls"]} request cho '
+                     f'dữ liệu tầm {size_str}. Khi hết quota sẽ báo 429.')
+        warn.append(kline)
+        progress(97, "build", kline)
     report.warnings = warn
     progress(98, "build", "Document assembled (council)")
     return report
